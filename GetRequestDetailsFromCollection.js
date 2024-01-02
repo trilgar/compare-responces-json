@@ -39,7 +39,7 @@ async function getCollectionDetails(collectionId, apiKey) {
         // Extract request details
         return collection.item.map(mapPostmanRequestToRequestDetails)
     } catch (error) {
-        console.error(`Error fetching collection details: ${error.message}`);
+        console.error(`Error fetching details from collection ${collectionId}: ${error.message}`);
         return null;
     }
 }
@@ -54,14 +54,14 @@ async function getRequestDetails(collectionId, requestId, apiKey) {
         const request = collection.item.find(item => item.id === requestId);
 
         if (!request) {
-            console.error(`Request with ID ${requestId} not found in the collection.`);
+            console.error(`Request with ID ${requestId} not found in the collection ${collectionId}.`);
             return null;
         }
 
         // Extract request details
         return mapPostmanRequestToRequestDetails(request);
     } catch (error) {
-        console.error(`Error fetching request details: ${error.message}`);
+        console.error(`Error fetching request details for request ${requestId} from collection ${collectionId}: ${error.message}`);
         return null;
     }
 }
@@ -121,38 +121,38 @@ class RequestDetails {
 
 async function compareResponses(oldUrl, newUrl, requestDetails, sortArrays) {
     try {
-        let oldResponse = null;
-        let newResponse = null;
-
-        let config = {
+        let configOld = {
+            url: oldUrl,
             headers: requestDetails.headers,
             params: requestDetails.queryParams,
             validateStatus: function (status) {
                 return true; // default
-            }
+            },
+            data: requestDetails.body,
+            method: requestDetails.method.toUpperCase()
         }
-        let payload = requestDetails.body;
-        let method = requestDetails.method;
+        let configNew = {
+            url: newUrl,
+            headers: requestDetails.headers,
+            params: requestDetails.queryParams,
+            validateStatus: function (status) {
+                return true; // default
+            },
+            data: requestDetails.body,
+            method: requestDetails.method.toUpperCase()
+        }
+        if (process.env.EXTENDED_LOGS) {
+            console.log("Sending request to old: " + JSON.stringify(configOld));
+            console.log("Sending request to new: " + JSON.stringify(configNew));
+        }
 
-        // axios.interceptors.request.use(request => {
-        //     console.log('Starting Request', JSON.stringify(request, null, 2))
-        // })
 
-        if (method === 'GET') {
-            newResponse = await axios.get(newUrl, config);
-            oldResponse = await axios.get(oldUrl, config);
-        } else if (method === 'POST') {
-            oldResponse = await axios.post(oldUrl, payload, config);
-            newResponse = await axios.post(newUrl, payload, config);
-        } else if (method === 'PUT') {
-            oldResponse = await axios.put(oldUrl, payload, config);
-            newResponse = await axios.put(newUrl, payload, config);
-        } else if (method === 'DELETE') {
-            oldResponse = await axios.delete(oldUrl, config);
-            newResponse = await axios.delete(newUrl, config);
-        } else {
-            console.log('Invalid method');
-            return false;
+        let newResponse = await axios(configNew);
+        let oldResponse = await axios(configOld);
+
+        if (process.env.EXTENDED_LOGS) {
+            console.log(`Received response from old: \n status: ${oldResponse.status}, \n body: ${JSON.stringify(oldResponse.data)}`);
+            console.log(`Received response from new: \n status: ${newResponse.status}, \n body: ${JSON.stringify(newResponse.data)}`);
         }
         if (!oldResponse || !newResponse) {
             console.log('Error retrieving responses');
