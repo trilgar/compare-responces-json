@@ -2,13 +2,46 @@ const axios = require('axios');
 var _ = require('lodash');
 
 async function compareEndpoints(oldUrl, newUrl, collectionId, requestId, apiKey, sortArrays) {
-    const requestDetails = await getRequestDetails(collectionId, requestId, apiKey);
-    if (!requestDetails) {
-        console.log('Failed to retrieve request details.');
-        return false;
-    }
+    if (requestId != null) {
+        const requestDetails = await getRequestDetails(collectionId, requestId, apiKey);
+        if (!requestDetails) {
+            console.log('Failed to retrieve request details.');
+            return false;
+        }
 
-    compareResponses(oldUrl.replace("localhost", "host.docker.internal"), newUrl.replace("localhost", "host.docker.internal"), requestDetails, sortArrays);
+        compareResponses(oldUrl.replace("localhost", "host.docker.internal"), newUrl.replace("localhost", "host.docker.internal"), requestDetails, sortArrays);
+    } else {
+        console.log("No request id provided, comparing all requests in collection");
+        const requestDetails = await getCollectionDetails(collectionId, apiKey);
+        if (!requestDetails) {
+            console.log('Failed to retrieve request details.');
+            return false;
+        }
+        for (const request of requestDetails) {
+            console.log("Comparing request: " + request.name);
+            await compareResponses(oldUrl.replace("localhost", "host.docker.internal") + request.path, newUrl.replace("localhost", "host.docker.internal") + request.path, request, sortArrays);
+            console.log("---------------------------------------------------");
+        }
+    }
+}
+
+async function getCollectionDetails(collectionId, apiKey) {
+    try {
+        const response = await axios.get(`https://api.postman.com/collections/${collectionId}?access_key=${apiKey}`);
+
+        const collection = response.data.collection;
+
+        if (!collection) {
+            console.error(`Collection with ID ${collectionId} not found.`);
+            return null;
+        }
+
+        // Extract request details
+        return collection.item.map(mapPostmanRequestToRequestDetails)
+    } catch (error) {
+        console.error(`Error fetching collection details: ${error.message}`);
+        return null;
+    }
 }
 
 async function getRequestDetails(collectionId, requestId, apiKey) {
@@ -26,16 +59,21 @@ async function getRequestDetails(collectionId, requestId, apiKey) {
         }
 
         // Extract request details
-        return new RequestDetails(
-            request.name,
-            request.request.method,
-            getFromKeyValueArrayToMap(request.request.header ? request.request.header : []),
-            getFromKeyValueArrayToMap(request.request.url.query ? request.request.url.query : []),
-            request.request.body ? request.request.body.raw : null);
+        return mapPostmanRequestToRequestDetails(request);
     } catch (error) {
         console.error(`Error fetching request details: ${error.message}`);
         return null;
     }
+}
+
+function mapPostmanRequestToRequestDetails(request) {
+    return new RequestDetails(
+        request.name,
+        request.request.method,
+        getFromKeyValueArrayToMap(request.request.header ? request.request.header : []),
+        getFromKeyValueArrayToMap(request.request.url.query ? request.request.url.query : []),
+        '/' + request.request.url.path.join('/'),
+        request.request.body ? request.request.body.raw : null);
 }
 
 function getFromKeyValueArrayToMap(keyValueArray) {
@@ -51,12 +89,13 @@ function getFromKeyValueArrayToMap(keyValueArray) {
 }
 
 class RequestDetails {
-    constructor(name, method, headers, queryParams, body) {
+    constructor(name, method, headers, queryParams, path, body) {
         this.name = name;
         this._method = method;
         this._headers = headers;
         this._queryParams = queryParams;
         this._body = body;
+        this._path = path;
     }
 
     get method() {
@@ -74,6 +113,10 @@ class RequestDetails {
     get body() {
         return this._body;
     }
+
+    get path() {
+        return this._path;
+    }
 }
 
 async function compareResponses(oldUrl, newUrl, requestDetails, sortArrays) {
@@ -84,6 +127,9 @@ async function compareResponses(oldUrl, newUrl, requestDetails, sortArrays) {
         let config = {
             headers: requestDetails.headers,
             params: requestDetails.queryParams,
+            validateStatus: function (status) {
+                return true; // default
+            }
         }
         let payload = requestDetails.body;
         let method = requestDetails.method;
@@ -116,7 +162,6 @@ async function compareResponses(oldUrl, newUrl, requestDetails, sortArrays) {
         // Compare status codes
         if (oldResponse.status !== newResponse.status) {
             console.log(`Status codes differ for endpoint: Old - ${oldResponse.status}, New - ${newResponse.status}`);
-            return false;
         }
         let difference = deepDiff(oldResponse.data, newResponse.data, sortArrays);
 
@@ -186,12 +231,6 @@ function sortArrayByJSONString(arr) {
     return sortedArray;
 }
 
-// Example usage
-// const collectionId = '13494300-16d6d8f3-a526-44bc-8f80-cb5e9c973dd9';
-// const requestId = '7fef763c-95b8-418c-b814-6b687bdb3d05';
-// const apiKey = 'PMAT-01HJTWNR860JAVYFQHWHA4E6VJ';
-// const oldUrl = 'https://2c9718e8-3c0d-421a-ac78-97bf5786c9b9.mock.pstmn.io/NMS/resource';
-// const newUrl = 'http://localhost:8080/NMS/resource';
 
 const collectionId = process.env.COLLECTION_ID;
 const requestId = process.env.REQUEST_ID;
@@ -200,4 +239,23 @@ const oldUrl = process.env.OLD_URL;
 const newUrl = process.env.NEW_URL;
 const sortArrays = process.env.SORT_ARRAYS;
 
-compareEndpoints(oldUrl, newUrl, collectionId, requestId, apiKey, sortArrays);
+let requiredParamsPresent = true;
+if (!collectionId) {
+    console.log('COLLECTION_ID is required. (Get from Info page of collection in Postman)');
+    requiredParamsPresent = false;
+}
+if (!apiKey) {
+    console.log('API_KEY is required. (Get from Share option in postman)');
+    requiredParamsPresent = false;
+}
+if (!oldUrl) {
+    console.log('OLD_URL is required.');
+    requiredParamsPresent = false;
+}
+if (!newUrl) {
+    console.log('NEW_URL is required.');
+    requiredParamsPresent = false;
+}
+if (requiredParamsPresent) {
+    compareEndpoints(oldUrl, newUrl, collectionId, requestId, apiKey, sortArrays);
+}
