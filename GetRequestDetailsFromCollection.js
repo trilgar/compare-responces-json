@@ -1,20 +1,14 @@
 const axios = require('axios');
 var _ = require('lodash');
 
-async function compareEndpoints(oldUrl, newUrl, collectionId, requestId, apiKey) {
+async function compareEndpoints(oldUrl, newUrl, collectionId, requestId, apiKey, sortArrays) {
     const requestDetails = await getRequestDetails(collectionId, requestId, apiKey);
     if (!requestDetails) {
         console.log('Failed to retrieve request details.');
         return false;
     }
 
-    compareResponses(oldUrl.replace("localhost", "127.0.0.1"), newUrl.replace("localhost", "127.0.0.1"), requestDetails).then(result => {
-        if (result) {
-            console.log('Responses match!');
-        } else {
-            console.log('Responses differ.');
-        }
-    });
+    compareResponses(oldUrl.replace("localhost", "host.docker.internal"), newUrl.replace("localhost", "host.docker.internal"), requestDetails, sortArrays);
 }
 
 async function getRequestDetails(collectionId, requestId, apiKey) {
@@ -82,7 +76,7 @@ class RequestDetails {
     }
 }
 
-async function compareResponses(oldUrl, newUrl, requestDetails) {
+async function compareResponses(oldUrl, newUrl, requestDetails, sortArrays) {
     try {
         let oldResponse = null;
         let newResponse = null;
@@ -124,7 +118,7 @@ async function compareResponses(oldUrl, newUrl, requestDetails) {
             console.log(`Status codes differ for endpoint: Old - ${oldResponse.status}, New - ${newResponse.status}`);
             return false;
         }
-        let difference = deepDiff(oldResponse.data, newResponse.data);
+        let difference = deepDiff(oldResponse.data, newResponse.data, sortArrays);
 
         console.log('Difference between responses: ', difference);
 
@@ -139,9 +133,10 @@ async function compareResponses(oldUrl, newUrl, requestDetails) {
  * Deep diff between two object-likes
  * @param  {Object} fromObject the original object
  * @param  {Object} toObject   the updated object
+ * @param {string} sortArrays whether to sort arrays before comparing
  * @return {Object}            a new object which represents the diff
  */
-function deepDiff(fromObject, toObject) {
+function deepDiff(fromObject, toObject, sortArrays = "false") {
     const changes = {};
 
     const buildPath = (path, obj, key) =>
@@ -154,7 +149,7 @@ function deepDiff(fromObject, toObject) {
                 changes[currentPath] = {from: _.get(fromObject, key)};
             }
         }
-        if (_.isArray(toObject) && _.isArray(fromObject)) {
+        if (sortArrays === 'true' && _.isArray(toObject) && _.isArray(fromObject)) {
             fromObject = sortArrayByJSONString(fromObject)
             toObject = sortArrayByJSONString(toObject)
         }
@@ -203,5 +198,6 @@ const requestId = process.env.REQUEST_ID;
 const apiKey = process.env.API_KEY;
 const oldUrl = process.env.OLD_URL;
 const newUrl = process.env.NEW_URL;
+const sortArrays = process.env.SORT_ARRAYS;
 
-compareEndpoints(oldUrl, newUrl, collectionId, requestId, apiKey);
+compareEndpoints(oldUrl, newUrl, collectionId, requestId, apiKey, sortArrays);
